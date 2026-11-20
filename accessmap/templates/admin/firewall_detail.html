@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ firewall.name }} — AccessMap{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>{{ firewall.name }}</h1>
+  <p class="muted">
+    Vendor: <strong>{{ firewall.vendor }}</strong> ·
+    Site: {{ firewall.site or '—' }} ·
+    Host: {{ firewall.host or '—' }} ·
+    Status: <strong>{{ 'Enabled' if firewall.enabled else 'Disabled' }}</strong> ·
+    Events: {{ events|length }} shown
+  </p>
+</section>
+
+<section class="card">
+  <h2>Ingest token (shown once — copy it now)</h2>
+  <p class="muted">Configure the firewall to POST events to this endpoint with
+     <code>Authorization: Bearer &lt;token&gt;</code>. Rotating the token invalidates the old one.</p>
+  <p><code class="token">{{ firewall.ingest_token }}</code></p>
+  <p><code class="token">{{ ingest_url }}</code></p>
+  <form method="post" action="{{ url_for('admin.rotate_token', firewall_id=firewall.id) }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">Rotate token</button>
+  </form>
+  <form method="post" action="{{ url_for('admin.toggle_firewall', firewall_id=firewall.id) }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">{{ 'Disable' if firewall.enabled else 'Enable' }} firewall</button>
+  </form>
+  <form method="post" action="{{ url_for('admin.delete_firewall', firewall_id=firewall.id) }}" class="inline-form"
+        onsubmit="return confirm('Delete this firewall and all its events?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-danger" type="submit">Delete firewall</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Forwarding examples</h2>
+  <h3>FortiGate (syslog over HTTPS JSON forwarder)</h3>
+  <pre>config log syslogd setting
+    set server "{{ ingest_url }}"
+    set format json
+    set custom-field-name1 "Authorization"
+    set custom-field-value1 "Bearer {{ firewall.ingest_token }}"
+end
+config log syslogd filter
+    set advanced-filter "field['action'] eq 'allow' or field['action'] eq 'deny'"
+end</pre>
+  <h3>Palo Alto PAN-OS (syslog forwarding profile)</h3>
+  <pre>Server: {{ ingest_url }}  (HTTP POST, JSON)
+Header: Authorization: Bearer {{ firewall.ingest_token }}
+Body: {"events":[{"src_ip":"$SRC","dst_ip":"$DST","dst_domain":"$HOST",
+      "dst_port":$DPORT,"protocol":"$PROTO","action":"$ACTION",
+      "bytes_out":$BYTES}]}</pre>
+  <p class="muted small">Exact menu paths vary by firmware version; the JSON field names above are what AccessMap expects. See README for the generic JSON format.</p>
+</section>
+
+<section>
+  <h2>Recent events from this firewall</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Time</th><th>Source</th><th>Destination</th><th>Domain</th><th>Port</th><th>Action</th><th>Threat</th></tr></thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td>{{ e.ts }}</td><td>{{ e.src_ip }} ({{ e.src_city }}, {{ e.src_country }})</td>
+          <td>{{ e.dst_ip }} ({{ e.dst_city }}, {{ e.dst_country }})</td>
+          <td>{{ e.dst_domain or '—' }}</td><td>{{ e.dst_port }}</td>
+          <td>{{ e.action or '—' }}</td><td><span class="badge badge-{{ e.threat }}">{{ e.threat }}</span></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="muted">No events yet from this firewall.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Add admin — AccessMap{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Add another admin</h1>
+  <p class="muted">The new admin can sign in and manage firewalls. Public
+     registration is closed, so this is the only way to add admins.</p>
+  <form method="post" action="{{ url_for('admin.new_admin') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Username
+      <input name="username" type="text" required minlength="3" maxlength="32"
+             value="{{ username or '' }}">
+    </label>
+    <label>Email
+      <input name="email" type="email" required value="{{ email or '' }}">
+    </label>
+    <label>Password (min 10 chars, letters + digits)
+      <input name="password" type="password" required minlength="10">
+    </label>
+    <label>Confirm password
+      <input name="confirm" type="password" required>
+    </label>
+    <button class="btn btn-primary" type="submit">Add admin</button>
+  </form>
+</section>
+{% endblock %}

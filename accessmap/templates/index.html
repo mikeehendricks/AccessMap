@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}AccessMap — Live threat map{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>Live threat map</h1>
+  <p class="muted">
+    Real-time source → destination view of websites visited by end users,
+    streamed from enrolled Fortinet FortiGate and Palo Alto PAN-OS firewalls.
+    Arcs are coloured by threat level; click one for details.
+  </p>
+</section>
+
+<section class="stats" id="stats" aria-live="polite">
+  <div class="stat"><span class="stat-num" id="stat-events">–</span><span class="stat-label">Events</span></div>
+  <div class="stat"><span class="stat-num" id="stat-threats">–</span><span class="stat-label">Threats (high/critical)</span></div>
+  <div class="stat"><span class="stat-num" id="stat-countries">–</span><span class="stat-label">Destination countries</span></div>
+  <div class="stat"><span class="stat-num" id="stat-firewalls">–</span><span class="stat-label">Enrolled firewalls</span></div>
+</section>
+
+<section class="map-wrap">
+  <div id="map" role="application" aria-label="World threat map"></div>
+  <div class="map-controls">
+    <label>Firewall
+      <select id="filter-firewall"><option value="">All firewalls</option></select>
+    </label>
+    <label>Threat
+      <select id="filter-threat">
+        <option value="">All levels</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="unknown">Unknown</option>
+      </select>
+    </label>
+    <label>Find IP
+      <input id="ip-search" type="text" placeholder="e.g. 203.0.113.10" size="16">
+    </label>
+    <button class="btn" id="ip-search-btn" type="button">Locate</button>
+    <button class="btn btn-ghost" id="refresh-btn" type="button">Refresh</button>
+    <span class="muted" id="last-updated"></span>
+  </div>
+  <div class="legend" aria-label="Threat legend">
+    <span><i class="dot dot-critical"></i> Critical</span>
+    <span><i class="dot dot-high"></i> High</span>
+    <span><i class="dot dot-medium"></i> Medium</span>
+    <span><i class="dot dot-low"></i> Low</span>
+    <span><i class="dot dot-unknown"></i> Unknown</span>
+  </div>
+</section>
+
+<section>
+  <h2>Recent visits</h2>
+  <div class="table-wrap">
+    <table class="table" id="events-table">
+      <thead>
+        <tr>
+          <th>Time</th><th>Source</th><th>Destination</th><th>Domain</th>
+          <th>Port</th><th>Action</th><th>Threat</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+{% endblock %}

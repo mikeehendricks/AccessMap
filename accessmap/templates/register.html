@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Create first admin — AccessMap{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Create the first admin</h1>
+  <p class="muted">
+    This page is available <strong>once</strong>, before any admin exists.
+    After you create this account, registration closes and only an
+    existing admin can add more admins from the admin panel.
+  </p>
+  <form method="post" action="{{ url_for('auth.register') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Username
+      <input name="username" type="text" required minlength="3" maxlength="32"
+             autocomplete="username" value="{{ username or '' }}">
+    </label>
+    <label>Email
+      <input name="email" type="email" required autocomplete="email"
+             value="{{ email or '' }}">
+    </label>
+    <label>Password (min 10 chars, letters + digits)
+      <input name="password" type="password" required minlength="10"
+             autocomplete="new-password">
+    </label>
+    <label>Confirm password
+      <input name="confirm" type="password" required autocomplete="new-password">
+    </label>
+    <button class="btn btn-primary" type="submit">Create admin account</button>
+  </form>
+</section>
+{% endblock %}

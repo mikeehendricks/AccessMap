@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AccessMap{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">
+      <span class="brand-mark" aria-hidden="true">◉</span> AccessMap
+    </a>
+    <nav class="topnav">
+      <a href="{{ url_for('index') }}">Threat map</a>
+      {% if current_admin() %}
+        <a href="{{ url_for('admin.dashboard') }}">Admin panel</a>
+        <span class="user-chip">{{ current_admin().username }}</span>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-ghost" type="submit">Sign out</button>
+        </form>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}">Sign in</a>
+      {% endif %}
+    </nav>
+  </header>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>AccessMap — firewall threat map for Fortinet FortiGate &amp; Palo Alto PAN-OS</span>
+    <span>Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors</span>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

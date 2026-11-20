@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Enroll firewall — AccessMap{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Enroll firewall</h1>
+  <p class="muted">Register a Fortinet FortiGate or Palo Alto PAN-OS firewall.
+     You will get a one-time ingest token to configure on the firewall.</p>
+  <form method="post" action="{{ url_for('admin.new_firewall') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Name
+      <input name="name" type="text" required maxlength="128" value="{{ name or '' }}"
+             placeholder="e.g. FG-Manila-01">
+    </label>
+    <label>Vendor
+      <select name="vendor" required>
+        <option value="fortinet" {% if vendor == 'fortinet' %}selected{% endif %}>Fortinet FortiGate</option>
+        <option value="paloalto" {% if vendor == 'paloalto' %}selected{% endif %}>Palo Alto PAN-OS</option>
+        <option value="other" {% if vendor == 'other' %}selected{% endif %}>Other / generic syslog</option>
+      </select>
+    </label>
+    <label>Firewall host / IP (optional)
+      <input name="host" type="text" maxlength="253" value="{{ host or '' }}"
+             placeholder="fg-manila-01.example.local">
+    </label>
+    <label>Site (optional)
+      <input name="site" type="text" maxlength="128" value="{{ site or '' }}"
+             placeholder="e.g. Manila HQ">
+    </label>
+    <button class="btn btn-primary" type="submit">Enroll firewall</button>
+  </form>
+</section>
+{% endblock %}

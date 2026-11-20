@@ -1,0 +1,21 @@
+[Unit]
+Description=AccessMap — firewall threat map
+After=network.target
+
+[Service]
+Type=simple
+User=accessmap
+Group=accessmap
+WorkingDirectory=/opt/accessmap
+EnvironmentFile=/opt/accessmap/.env
+ExecStart=/opt/accessmap/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/accessmap/data
+
+[Install]
+WantedBy=multi-user.target
