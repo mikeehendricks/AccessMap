@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Admin panel — AccessMap{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Admin panel</h1>
+  <p class="muted">Signed in as <strong>{{ current.username }}</strong>.
+     Enroll firewalls, manage admins, and monitor the feed.</p>
+  <p>
+    <a class="btn btn-primary" href="{{ url_for('admin.new_firewall') }}">+ Enroll firewall</a>
+    <a class="btn" href="{{ url_for('admin.new_admin') }}">+ Add admin</a>
+    <a class="btn btn-ghost" href="{{ url_for('admin.change_password') }}">Change my password</a>
+    <a class="btn btn-ghost" href="{{ url_for('index') }}">View threat map</a>
+  </p>
+</section>
+
+<section class="stats">
+  <div class="stat"><span class="stat-num">{{ stats.total_events }}</span><span class="stat-label">Events</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.threat_events }}</span><span class="stat-label">Threats</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.destination_countries }}</span><span class="stat-label">Countries</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.firewalls }}</span><span class="stat-label">Firewalls</span></div>
+</section>
+
+<section>
+  <h2>Enrolled firewalls</h2>
+  {% if firewalls %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Name</th><th>Vendor</th><th>Site</th><th>Events</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for fw in firewalls %}
+        <tr>
+          <td><a href="{{ url_for('admin.firewall_detail', firewall_id=fw.id) }}">{{ fw.name }}</a></td>
+          <td>{{ fw.vendor }}</td>
+          <td>{{ fw.site or '—' }}</td>
+          <td>{{ fw.event_count }}</td>
+          <td>{{ fw.last_seen_at or 'never' }}</td>
+          <td>{{ 'Enabled' if fw.enabled else 'Disabled' }}</td>
+          <td><a href="{{ url_for('admin.firewall_detail', firewall_id=fw.id) }}">Manage</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted">No firewalls enrolled yet. <a href="{{ url_for('admin.new_firewall') }}">Enroll your first firewall</a>.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Admins</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Created</th><th>Last login</th></tr></thead>
+      <tbody>
+      {% for a in admins %}
+        <tr>
+          <td>{{ a.username }}</td><td>{{ a.email }}</td>
+          <td>{{ 'Super admin' if a.is_super else 'Admin' }}</td>
+          <td>{{ a.created_at }}</td><td>{{ a.last_login_at or 'never' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Top destinations</h2>
+  {% if stats.top_destinations %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Domain</th><th>IP</th><th>Visits</th></tr></thead>
+      <tbody>
+      {% for d in stats.top_destinations %}
+        <tr><td>{{ d.dst_domain or '—' }}</td><td>{{ d.dst_ip }}</td><td>{{ d.hits }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted">No events yet — enroll a firewall or run the demo seeder.</p>
+  {% endif %}
+</section>
+{% endblock %}
