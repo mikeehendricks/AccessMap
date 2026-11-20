@@ -37,7 +37,9 @@ def test_security_headers_present(client):
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
     assert resp.headers.get("X-Frame-Options") == "SAMEORIGIN"
     assert "Content-Security-Policy" in resp.headers
-    assert resp.headers.get("Referrer-Policy") == "no-referrer"
+    # strict-origin-when-cross-origin preserves origin Referer required by
+    # OpenStreetMap's Tile Usage Policy without leaking paths/queries.
+    assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
 
 
 def test_xss_payload_is_escaped(admin_client):

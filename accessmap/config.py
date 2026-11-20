@@ -40,6 +40,7 @@ class Config:
     # Set COOKIE_SECURE=1 when serving over HTTPS (installer does this
     # automatically when it configures the nginx TLS reverse proxy).
     SESSION_COOKIE_SECURE: bool = _env_bool("COOKIE_SECURE", False)
+    ALLOW_FRAME_EMBED: bool = _env_bool("ALLOW_FRAME_EMBED", False)
     PERMANENT_SESSION_LIFETIME: int = 60 * 60 * 8  # 8 hours
 
     # --- geo lookup -------------------------------------------------

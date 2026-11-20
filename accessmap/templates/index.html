@@ -2,7 +2,7 @@
 {% block title %}AccessMap — Live threat map{% endblock %}
 
 {% block head %}
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -71,6 +71,6 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 {% endblock %}
