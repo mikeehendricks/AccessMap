@@ -56,7 +56,31 @@ input, select {
 .stat-num { display: block; font-size: 26px; font-weight: 800; }
 .stat-label { color: var(--muted); font-size: 13px; }
 .map-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
-#map { height: 480px; border-radius: 8px; background: #0d1526; }
+#map { height: 500px; border-radius: 8px; background: #081224; border: 1px solid #1b2c4b; }
+.leaflet-container { background: #081224 !important; font: inherit; color: var(--text); }
+.leaflet-bar a, .leaflet-control-layers {
+  background: var(--panel-2) !important; color: var(--text) !important;
+  border-color: var(--line) !important;
+}
+.leaflet-bar a:hover { background: #1e2f52 !important; color: var(--accent) !important; }
+.leaflet-control-layers-expanded { padding: 8px 12px !important; border-radius: 8px !important; }
+.leaflet-control-layers label { margin: 4px 0; font-weight: 500; font-size: 13px; cursor: pointer; }
+.leaflet-control-layers input { display: inline-block; width: auto; margin: 0 6px 0 0; }
+.leaflet-control-attribution {
+  background: rgba(11, 18, 32, 0.82) !important; color: var(--muted) !important;
+  font-size: 11px !important;
+}
+.leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel) !important; color: var(--text) !important;
+  border: 1px solid var(--line);
+}
+.country-tooltip {
+  background: rgba(17, 26, 46, 0.92); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 2px 7px; font-size: 12px; box-shadow: none;
+}
+.country-tooltip::before { display: none; }
 .map-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-top: 10px; }
 .map-controls label { margin: 0; font-size: 13px; }
 .map-controls input, .map-controls select { width: auto; }

@@ -45,3 +45,21 @@ def test_forms_have_csrf_and_submit(admin_client):
     body = admin_client.get("/admin/firewalls/new").get_data(as_text=True)
     assert 'name="csrf_token"' in body
     assert 'type="submit"' in body
+
+
+def test_map_uses_self_hosted_leaflet_and_world_geojson(client):
+    """Regression: world map must render out of the box with zero external CDN/tile dependency."""
+    body = client.get("/").get_data(as_text=True)
+    assert "vendor/leaflet/leaflet.js" in body
+    assert "vendor/leaflet/leaflet.css" in body
+    assert "unpkg.com" not in body
+    # Vendored Leaflet + Natural Earth world countries GeoJSON must be served.
+    assert client.get("/static/vendor/leaflet/leaflet.js").status_code == 200
+    assert client.get("/static/vendor/leaflet/leaflet.css").status_code == 200
+    world_resp = client.get("/static/vendor/world-countries.geojson")
+    assert world_resp.status_code == 200
+    world = world_resp.get_json()
+    assert world["type"] == "FeatureCollection"
+    assert len(world["features"]) >= 170
+    map_js = client.get("/static/js/map.js").get_data(as_text=True)
+    assert "/static/vendor/world-countries.geojson" in map_js

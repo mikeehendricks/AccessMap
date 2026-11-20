@@ -9,9 +9,13 @@ draws source → destination arcs on a world map, colour-coded by threat level.
 
 ## Features
 
-- **Live threat map** (`/`) — Leaflet world map with source → destination
+- **Live threat map** (`/`) — Leaflet world map with curved source → destination
   arcs, threat-level colours, firewall/threat filters, IP search, and a
-  recent-visits table that auto-refreshes every 15 s.
+  recent-visits table that auto-refreshes every 15 s. Both Leaflet and a
+  **Natural Earth 110m vector world map** (`static/vendor/`) are
+  self-hosted, so the continents and country borders render immediately
+  even offline or in air-gapped networks, with optional CARTO Dark Matter
+  and OpenStreetMap tile basemaps available via the layer switcher when online.
 - **Admin panel** (`/admin/`) — **one-time admin registration** (the public
   `/register` page closes forever once the first admin exists), then admins
   can **enroll firewalls** (Fortinet / Palo Alto / Other), **add more
@@ -28,7 +32,7 @@ draws source → destination arcs on a world map, colour-coded by threat level.
   creates the service user, systemd unit, firewall rules and nginx proxy,
   then health-checks the app.
 - **Clean code** — small modules with single responsibilities, type hints,
-  parameterized SQL everywhere, and a 34-test pytest suite.
+  parameterized SQL everywhere, and a 35-test pytest suite.
 
 ## Screenshots
 
@@ -116,10 +120,10 @@ accessmap/
   seed.py               Demo-data seeder
   routes/               auth, admin, API, ingest blueprints
   templates/            Jinja templates (map, login, register, admin)
-  static/               CSS + Leaflet map JS
+  static/               CSS + map JS + vendored Leaflet & Natural Earth world GeoJSON
 install.sh              One-time Ubuntu installer
 deploy/                 systemd unit + nginx reverse-proxy config
-tests/                  34 pytest tests (auth, ingest, geo, security, usability)
+tests/                  35 pytest tests (auth, ingest, geo, security, usability)
 docs/TESTING.md         Usability / bug / vulnerability test report
 scripts/capture_screenshots.py   Regenerate README screenshots
 ```

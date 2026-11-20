@@ -1,9 +1,9 @@
 """Capture README screenshots from real (seeded) application data.
 
 No browser is required: the script boots the app in-process with the
-demo seeder, reads the same JSON the live map uses, and renders
-faithful PNG screenshots of the threat map, admin dashboard,
-firewall detail and login pages with Pillow.
+demo seeder, reads the same JSON + Natural Earth world GeoJSON that
+the live Leaflet map uses, and renders faithful PNG screenshots of the
+threat map, admin dashboard, firewall detail and login pages with Pillow.
 
 Usage:  python scripts/capture_screenshots.py
 Output: screenshots/*.png
@@ -11,6 +11,7 @@ Output: screenshots/*.png
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -20,21 +21,34 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "screenshots")
+OUT_DIR = os.path.join(BASE_DIR, "screenshots")
+WORLD_GEOJSON = os.path.join(
+    BASE_DIR, "accessmap", "static", "vendor", "world-countries.geojson"
+)
 
 BG = (11, 18, 32)
 PANEL = (17, 26, 46)
 PANEL2 = (22, 33, 58)
+OCEAN = (8, 18, 36)
+LAND = (23, 41, 70)
+LAND_BORDER = (47, 77, 125)
+GRID = (16, 31, 56)
+EQUATOR = (27, 51, 88)
 LINE = (34, 48, 77)
 TEXT = (230, 237, 247)
 MUTED = (142, 163, 192)
 ACCENT = (56, 189, 248)
 THREAT_COLORS = {
-    "critical": (239, 68, 68), "high": (249, 115, 22),
-    "medium": (250, 204, 21), "low": (56, 189, 248),
+    "critical": (239, 68, 68),
+    "high": (249, 115, 22),
+    "medium": (250, 204, 21),
+    "low": (56, 189, 248),
     "unknown": (148, 163, 184),
 }
+
+LAT_MIN, LAT_MAX = -60.0, 82.0
 
 
 def font(size: int, bold: bool = False):
@@ -42,11 +56,11 @@ def font(size: int, bold: bool = False):
     return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
 
 
-def lonlat_to_xy(lon: float, lat: float, box: tuple[int, int, int, int]) -> tuple[float, float]:
-    """Equirectangular projection into the map box."""
-    x0, y0, x1, y1 = box
-    x = x0 + (lon + 180.0) / 360.0 * (x1 - x0)
-    y = y0 + (90.0 - lat) / 180.0 * (y1 - y0)
+def lonlat_to_xy(lon: float, lat: float, w: int, h: int) -> tuple[float, float]:
+    """Project (lon, lat) into map canvas coordinates matching the world viewport."""
+    clamped_lat = max(LAT_MIN, min(LAT_MAX, lat))
+    x = (lon + 180.0) / 360.0 * w
+    y = (LAT_MAX - clamped_lat) / (LAT_MAX - LAT_MIN) * h
     return x, y
 
 
@@ -66,78 +80,193 @@ def draw_stats(draw: ImageDraw.ImageDraw, stats: dict, y: int) -> None:
     ]
     x = 20
     for value, label in cards:
-        draw.rounded_rectangle([x, y, x + 240, y + 78], radius=10, fill=PANEL, outline=LINE)
+        draw.rounded_rectangle([x, y, x + 248, y + 78], radius=10, fill=PANEL, outline=LINE)
         draw.text((x + 16, y + 10), value, font=font(26, True), fill=TEXT)
         draw.text((x + 16, y + 48), label, font=font(13), fill=MUTED)
-        x += 256
+        x += 264
 
 
-def draw_map(draw: ImageDraw.ImageDraw, events: list[dict], box: tuple[int, int, int, int]) -> None:
-    x0, y0, x1, y1 = box
-    draw.rounded_rectangle(box, radius=10, fill=(13, 21, 38), outline=LINE)
-    # Graticule
+def render_world_canvas(events: list[dict], width: int, height: int) -> Image.Image:
+    """Render 2x-supersampled world map (continents + country borders + threat arcs)."""
+    scale = 2
+    sw, sh = width * scale, height * scale
+    canvas = Image.new("RGBA", (sw, sh), (*OCEAN, 255))
+    mdraw = ImageDraw.Draw(canvas, "RGBA")
+
+    # Graticule lines every 30 degrees
     for lon in range(-180, 181, 30):
-        gx, _ = lonlat_to_xy(lon, 0, box)
-        draw.line([gx, y0, gx, y1], fill=(24, 36, 60), width=1)
-    for lat in range(-60, 91, 30):
-        _, gy = lonlat_to_xy(0, lat, box)
-        draw.line([x0, gy, x1, gy], fill=(24, 36, 60), width=1)
-    # Arcs (quadratic curves lifted above the straight line)
-    for e in events:
-        if not e["src_lat"] or not e["dst_lat"]:
+        gx, _ = lonlat_to_xy(lon, 0, sw, sh)
+        col = (*EQUATOR, 255) if lon == 0 else (*GRID, 255)
+        mdraw.line([gx, 0, gx, sh], fill=col, width=scale)
+    for lat in (-60, -30, 0, 30, 60):
+        _, gy = lonlat_to_xy(0, lat, sw, sh)
+        col = (*EQUATOR, 255) if lat == 0 else (*GRID, 255)
+        mdraw.line([0, gy, sw, gy], fill=col, width=scale)
+
+    # World countries from the same self-hosted Natural Earth GeoJSON used by map.js
+    with open(WORLD_GEOJSON, encoding="utf-8") as fh:
+        world = json.load(fh)
+
+    for feat in world.get("features", []):
+        if (feat.get("properties") or {}).get("name") == "Antarctica":
             continue
-        sx, sy = lonlat_to_xy(e["src_lon"], e["src_lat"], box)
-        dx, dy = lonlat_to_xy(e["dst_lon"], e["dst_lat"], box)
-        color = THREAT_COLORS.get(e["threat"], THREAT_COLORS["unknown"])
-        mx, my = (sx + dx) / 2, min(sy, dy) - 40
+        geom = feat.get("geometry") or {}
+        gtype = geom.get("type")
+        coords = geom.get("coordinates") or []
+        polys = coords if gtype == "MultiPolygon" else ([coords] if gtype == "Polygon" else [])
+        for poly in polys:
+            if not poly:
+                continue
+            exterior = poly[0]
+            pts = [lonlat_to_xy(pt[0], pt[1], sw, sh) for pt in exterior]
+            if len(pts) >= 3:
+                mdraw.polygon(pts, fill=(*LAND, 248), outline=(*LAND_BORDER, 255))
+                mdraw.line(pts + [pts[0]], fill=(*LAND_BORDER, 255), width=max(1, int(1.4 * scale)))
+
+    # Curved threat arcs (glow + crisp stroke)
+    for e in events:
+        if e.get("src_lat") is None or e.get("dst_lat") is None:
+            continue
+        sx, sy = lonlat_to_xy(float(e["src_lon"]), float(e["src_lat"]), sw, sh)
+        dx, dy = lonlat_to_xy(float(e["dst_lon"]), float(e["dst_lat"]), sw, sh)
+        rgb = THREAT_COLORS.get(e["threat"], THREAT_COLORS["unknown"])
+        dist = math.hypot(dx - sx, dy - sy)
+        lift = min(90 * scale, max(22 * scale, dist * 0.22))
+        mx, my = (sx + dx) / 2.0, min(sy, dy) - lift
         points = []
-        for t in [i / 40 for i in range(41)]:
-            px = (1 - t) ** 2 * sx + 2 * (1 - t) * t * mx + t**2 * dx
-            py = (1 - t) ** 2 * sy + 2 * (1 - t) * t * my + t**2 * dy
+        for i in range(45):
+            t = i / 44.0
+            u = 1.0 - t
+            px = u * u * sx + 2 * u * t * mx + t * t * dx
+            py = u * u * sy + 2 * u * t * my + t * t * dy
             points.append((px, py))
-        width = 3 if e["threat"] in {"critical", "high"} else 2
-        draw.line(points, fill=color, width=width)
+        is_high = e["threat"] in {"critical", "high"}
+        mdraw.line(points, fill=(*rgb, 55), width=(7 if is_high else 5) * scale)
+        mdraw.line(points, fill=(*rgb, 235), width=(3 if is_high else 2) * scale)
+
+    # Source & destination markers
     for e in events:
-        if not e["src_lat"] or not e["dst_lat"]:
+        if e.get("src_lat") is None or e.get("dst_lat") is None:
             continue
-        color = THREAT_COLORS.get(e["threat"], THREAT_COLORS["unknown"])
-        for lon, lat, r in ((e["src_lon"], e["src_lat"], 4), (e["dst_lon"], e["dst_lat"], 5)):
-            px, py = lonlat_to_xy(lon, lat, box)
-            draw.ellipse([px - r, py - r, px + r, py + r], fill=color, outline=color)
+        rgb = THREAT_COLORS.get(e["threat"], THREAT_COLORS["unknown"])
+        is_high = e["threat"] in {"critical", "high"}
+        sx, sy = lonlat_to_xy(float(e["src_lon"]), float(e["src_lat"]), sw, sh)
+        dx, dy = lonlat_to_xy(float(e["dst_lon"]), float(e["dst_lat"]), sw, sh)
+        sr = 4 * scale
+        dr = (6 if is_high else 5) * scale
+        mdraw.ellipse([dx - dr * 2, dy - dr * 2, dx + dr * 2, dy + dr * 2], fill=(*rgb, 48))
+        mdraw.ellipse([dx - dr, dy - dr, dx + dr, dy + dr], fill=(*rgb, 245), outline=(230, 237, 247, 220), width=scale)
+        mdraw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(*rgb, 235), outline=(230, 237, 247, 240), width=scale)
+
+    down = canvas.resize((width, height), Image.Resampling.LANCZOS).convert("RGB")
+    ui = ImageDraw.Draw(down)
+
+    # Leaflet zoom control (top-left) & layer control badge (top-right)
+    ui.rounded_rectangle([12, 12, 42, 72], radius=6, fill=PANEL2, outline=LINE)
+    ui.line([12, 42, 42, 42], fill=LINE, width=1)
+    ui.text((21, 16), "+", font=font(16, True), fill=TEXT)
+    ui.text((22, 45), "−", font=font(16, True), fill=TEXT)
+
+    ui.rounded_rectangle([width - 196, 12, width - 12, 40], radius=6, fill=PANEL2, outline=LINE)
+    ui.text((width - 184, 18), "Layers: SOC Vector World", font=font(11, True), fill=TEXT)
+
+    ui.rectangle([width - 210, height - 20, width - 6, height - 4], fill=(11, 18, 32))
+    ui.text((width - 204, height - 18), "Leaflet | Natural Earth · OSM", font=font(10), fill=MUTED)
+    return down
+
+
+def draw_map_card(img: Image.Image, draw: ImageDraw.ImageDraw, events: list[dict], y: int) -> int:
+    """Draw the complete map-wrap card (world map + filter controls + threat legend)."""
+    card_h = 520
+    draw.rounded_rectangle([20, y, 1080, y + card_h], radius=10, fill=PANEL, outline=LINE)
+    map_w, map_h = 1036, 420
+    world_img = render_world_canvas(events, map_w, map_h)
+    img.paste(world_img, (32, y + 12))
+    draw.rounded_rectangle([32, y + 12, 32 + map_w, y + 12 + map_h], radius=8, outline=(27, 44, 75))
+
+    # Filter row
+    cy = y + 12 + map_h + 12
+    controls = [
+        ("Firewall:", "All firewalls", 138),
+        ("Threat:", "All levels", 118),
+        ("Find IP:", "e.g. 203.0.113.10", 158),
+    ]
+    cx = 32
+    for label, val, bw in controls:
+        draw.text((cx, cy + 7), label, font=font(12, True), fill=MUTED)
+        lw = int(draw.textlength(label, font=font(12, True))) + 8
+        draw.rounded_rectangle([cx + lw, cy, cx + lw + bw, cy + 30], radius=6, fill=PANEL2, outline=LINE)
+        draw.text((cx + lw + 10, cy + 7), val, font=font(12), fill=TEXT if "e.g." not in val else MUTED)
+        cx += lw + bw + 14
+    draw.rounded_rectangle([cx, cy, cx + 72, cy + 30], radius=6, fill=PANEL2, outline=LINE)
+    draw.text((cx + 14, cy + 7), "Locate", font=font(12, True), fill=TEXT)
+    cx += 80
+    draw.rounded_rectangle([cx, cy, cx + 76, cy + 30], radius=6, fill=PANEL, outline=LINE)
+    draw.text((cx + 13, cy + 7), "Refresh", font=font(12), fill=TEXT)
+
+    # Legend with colour-coded dots
+    ly = cy + 40
+    lx = 32
+    for key, label in (
+        ("critical", "Critical"),
+        ("high", "High"),
+        ("medium", "Medium"),
+        ("low", "Low"),
+        ("unknown", "Unknown"),
+    ):
+        col = THREAT_COLORS[key]
+        draw.ellipse([lx, ly + 4, lx + 10, ly + 14], fill=col)
+        draw.text((lx + 16, ly + 1), label, font=font(13), fill=MUTED)
+        lx += int(draw.textlength(label, font=font(13))) + 38
+
+    return y + card_h
 
 
 def draw_table(draw: ImageDraw.ImageDraw, events: list[dict], y: int, width: int) -> None:
     headers = ["Time", "Source", "Destination", "Domain", "Port", "Action", "Threat"]
-    col_x = [20, 170, 400, 630, 800, 870, 950]
-    draw.rounded_rectangle([20, y, width - 20, y + 34 + 28 * 8], radius=10, fill=PANEL, outline=LINE)
+    col_x = [34, 165, 390, 625, 810, 875, 960]
+    rows = events[:6]
+    draw.rounded_rectangle([20, y, width - 20, y + 36 + 30 * len(rows)], radius=10, fill=PANEL, outline=LINE)
     for i, h in enumerate(headers):
-        draw.text((col_x[i], y + 10), h.upper(), font=font(11, True), fill=MUTED)
-    for row, e in enumerate(events[:8]):
-        ry = y + 34 + row * 28
+        draw.text((col_x[i], y + 11), h.upper(), font=font(11, True), fill=MUTED)
+    for row, e in enumerate(rows):
+        ry = y + 36 + row * 30
         draw.line([20, ry, width - 20, ry], fill=LINE, width=1)
-        vals = [str(e["ts"])[11:], f"{e['src_ip']} ({e['src_city']})",
-                f"{e['dst_ip']} ({e['dst_city']})", e["dst_domain"] or "—",
-                str(e["dst_port"]), e["action"] or "—", e["threat"]]
+        vals = [
+            str(e["ts"])[11:],
+            f"{e['src_ip']} ({e['src_city']})",
+            f"{e['dst_ip']} ({e['dst_city']})",
+            e["dst_domain"] or "—",
+            str(e["dst_port"]),
+            e["action"] or "—",
+            e["threat"],
+        ]
         for i, v in enumerate(vals):
             color = THREAT_COLORS.get(v, TEXT) if i == 6 else TEXT
-            draw.text((col_x[i], ry + 6), v[:28], font=font(12), fill=color)
+            draw.text((col_x[i], ry + 7), v[:28], font=font(12, i == 6), fill=color)
 
 
 def screenshot_threat_map(events: list[dict], stats: dict) -> None:
-    img = Image.new("RGB", (1100, 900), BG)
+    img = Image.new("RGB", (1100, 1060), BG)
     draw = ImageDraw.Draw(img)
     draw_topbar(draw, 1100, "Threat map    Admin panel    admin")
-    draw.text((20, 70), "Live threat map", font=font(28, True), fill=TEXT)
-    draw.text((20, 108), "Source → destination view of websites visited by end users,",
-              font=font(14), fill=MUTED)
-    draw.text((20, 128), "streamed from enrolled Fortinet FortiGate and Palo Alto PAN-OS firewalls.",
-              font=font(14), fill=MUTED)
-    draw_stats(draw, stats, 160)
-    draw_map(draw, events, (20, 260, 1080, 640))
-    draw.text((20, 656), "● Critical   ● High   ● Medium   ● Low   ● Unknown",
-              font=font(13), fill=MUTED)
-    draw.text((20, 690), "Recent visits", font=font(20, True), fill=TEXT)
-    draw_table(draw, events, 726, 1100)
+    draw.text((20, 68), "Live threat map", font=font(28, True), fill=TEXT)
+    draw.text(
+        (20, 106),
+        "Real-time source → destination view of websites visited by end users, streamed from enrolled",
+        font=font(14),
+        fill=MUTED,
+    )
+    draw.text(
+        (20, 126),
+        "Fortinet FortiGate and Palo Alto PAN-OS firewalls. Arcs are coloured by threat level.",
+        font=font(14),
+        fill=MUTED,
+    )
+    draw_stats(draw, stats, 156)
+    bottom_map = draw_map_card(img, draw, events, 250)
+    draw.text((20, bottom_map + 18), "Recent visits", font=font(20, True), fill=TEXT)
+    draw_table(draw, events, bottom_map + 50, 1100)
     img.save(os.path.join(OUT_DIR, "threat-map.png"))
 
 
@@ -153,7 +282,7 @@ def screenshot_dashboard(stats: dict, firewalls: list[dict], admins: list[dict])
     y = 288
     draw.rounded_rectangle([20, y, 1080, y + 34 + 28 * max(len(firewalls), 1)], radius=10,
                            fill=PANEL, outline=LINE)
-    cols = [20, 300, 460, 620, 760, 920]
+    cols = [34, 300, 460, 620, 760, 920]
     for i, h in enumerate(["NAME", "VENDOR", "SITE", "EVENTS", "LAST SEEN", "STATUS"]):
         draw.text((cols[i], y + 10), h, font=font(11, True), fill=MUTED)
     for row, fw in enumerate(firewalls):

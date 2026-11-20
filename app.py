@@ -50,15 +50,20 @@ def create_app(config: type[Config] | None = None) -> Flask:
     def add_security_headers(response):
         """Baseline security headers (see docs/TESTING.md)."""
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if not app.config.get("ALLOW_FRAME_EMBED", False):
+            response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' https://unpkg.com; "
-            "style-src 'self' https://unpkg.com 'unsafe-inline'; "
-            "img-src 'self' data: https://*.tile.openstreetmap.org; "
+            # Leaflet + world GeoJSON are self-hosted; optional raster tiles
+            # may load from OpenStreetMap or CARTO when online.
+            "default-src 'self'; script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; "
             "connect-src 'self'; font-src 'self' data:",
         )
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # strict-origin-when-cross-origin preserves origin Referer required by
+        # OpenStreetMap's Tile Usage Policy without leaking paths or query params.
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         return response
 
     @app.route("/", methods=["GET"])

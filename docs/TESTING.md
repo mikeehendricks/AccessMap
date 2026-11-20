@@ -6,7 +6,7 @@ with:
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
-# 34 passed
+# 35 passed
 ```
 
 ## 1. Usability testing
@@ -30,9 +30,12 @@ with:
 - [x] Layout is responsive (map height shrinks, topbar stacks under 640 px).
 - [x] Colour is never the only signal: threat level is also printed as text (badges/table).
 
-**Findings:** none blocking. Minor: the map needs internet access for
-Leaflet/OpenStreetMap tiles (CDN); the API and tables work offline.
-Documented in README.
+**Findings:** none blocking. Both Leaflet (`static/vendor/leaflet/`) and
+a Natural Earth 110m vector world map (`static/vendor/world-countries.geojson`)
+are self-hosted, so the full world map (continents + country borders +
+curved arcs) renders with zero external CDN or tile-server dependencies;
+optional CARTO Dark Matter and OpenStreetMap tile layers are available
+when online. (Regression test: `test_map_uses_self_hosted_leaflet_and_world_geojson`.)
 
 ## 2. Bug testing
 
@@ -46,6 +49,7 @@ Bugs found during development (all fixed, regression-tested):
 | B4 | `TemplateNotFound: index.html` | High | Flask looked for templates next to `app.py` | Explicit `template_folder`/`static_folder` | full suite |
 | B5 | `TypeError: 'NoneType' object is not callable` in `base.html` | High | Context processor called `current_admin()` instead of passing the function | Pass function, call in template | full suite |
 | B6 | CSRF 400s after login in tests | Low (test-only) | Session CSRF rotates on login (by design) | Tests fetch a fresh token | full suite |
+| B7 | World map not visible on threat map | High | `Referrer-Policy: no-referrer` caused OSM tile servers to block tiles (HTTP 403), and unpkg CDN / external tiles failed in restricted networks | Bundled self-hosted Leaflet + Natural Earth 110m vector world map (`world-countries.geojson`) as default layer, and switched `Referrer-Policy` to `strict-origin-when-cross-origin` for optional CARTO/OSM tiles | `test_map_uses_self_hosted_leaflet_and_world_geojson` |
 
 ### Functional test matrix (all passing)
 
@@ -73,7 +77,7 @@ Manual + automated checks against the OWASP Top 10 (2021) relevant subset:
 | V7 | Token comparison | Code review | ✅ `hmac.compare_digest` |
 | V8 | Password storage | Code review + test | ✅ PBKDF2-HMAC-SHA256, 260k iterations, per-password salt |
 | V9 | Session security | Code review | ✅ HttpOnly + SameSite=Lax cookies; Secure flag behind HTTPS; CSRF rotates on login |
-| V10 | Security headers | `GET /` | ✅ CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer` |
+| V10 | Security headers | `GET /` | ✅ CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin` |
 | V11 | Brute force | 5 failed logins then correct password | ✅ Lockout message, login refused |
 | V12 | Input validation | Oversized batch, bad JSON, invalid IPs | ✅ 413/400/dropped with counts |
 | V13 | Verbose errors | `GET /no-such-page` | ✅ Generic 404 page, no stack traces |
