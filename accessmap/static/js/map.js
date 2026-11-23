@@ -135,22 +135,78 @@
   var markerLayer = L.layerGroup().addTo(map);
   var searchLayer = L.layerGroup().addTo(map);
 
-  function esc(value) {
-    var div = document.createElement("div");
-    div.textContent = value == null ? "" : String(value);
-    return div.innerHTML;
+  function text(value) {
+    return document.createTextNode(value == null ? "" : String(value));
+  }
+
+  function el(tag, className, content) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (content !== undefined) {
+      node.textContent = content == null ? "" : String(content);
+    }
+    return node;
+  }
+
+  function safeThreat(threat) {
+    var key = threat == null ? "" : String(threat);
+    return Object.prototype.hasOwnProperty.call(THREAT_COLORS, key) ? key : "unknown";
   }
 
   function colorFor(threat) {
-    return THREAT_COLORS[threat] || THREAT_COLORS.unknown;
+    return THREAT_COLORS[safeThreat(threat)];
   }
 
   function popupFor(e) {
-    return "<b>" + esc(e.dst_domain || e.dst_ip) + "</b><br>" +
-      esc(e.src_ip) + " (" + esc(e.src_city) + ", " + esc(e.src_country) + ") → " +
-      esc(e.dst_ip) + " (" + esc(e.dst_city) + ", " + esc(e.dst_country) + ")<br>" +
-      "Port " + esc(e.dst_port) + " · " + esc(e.action || "—") +
-      " · threat: <b>" + esc(e.threat) + "</b> (" + esc(e.threat_score) + ")";
+    var level = safeThreat(e.threat);
+    var wrap = document.createElement("div");
+    wrap.appendChild(el("b", null, e.dst_domain || e.dst_ip));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text(
+      (e.src_ip || "") + " (" + (e.src_city || "") + ", " + (e.src_country || "") + ") → " +
+      (e.dst_ip || "") + " (" + (e.dst_city || "") + ", " + (e.dst_country || "") + ")"
+    ));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text(
+      "Port " + (e.dst_port == null ? "" : e.dst_port) + " · " + (e.action || "—") + " · threat: "
+    ));
+    wrap.appendChild(el("b", null, level));
+    wrap.appendChild(text(" (" + (e.threat_score == null ? 0 : e.threat_score) + ")"));
+    return wrap;
+  }
+
+  function sourcePopupFor(e) {
+    var wrap = document.createElement("div");
+    wrap.appendChild(el("b", null, "Source"));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text(e.src_ip));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text((e.src_city || "") + ", " + (e.src_country || "")));
+    return wrap;
+  }
+
+  function destPopupFor(e) {
+    var wrap = document.createElement("div");
+    wrap.appendChild(el("b", null, "Destination"));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text(e.dst_domain || e.dst_ip));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text(
+      (e.dst_ip || "") + " · " + (e.dst_city || "") + ", " + (e.dst_country || "")
+    ));
+    return wrap;
+  }
+
+  function geoPopupFor(g) {
+    var wrap = document.createElement("div");
+    wrap.appendChild(el("b", null, g.ip));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(text((g.city || "") + ", " + (g.country || "")));
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(el("span", "muted", (g.isp || "") + " · via " + (g.source || "")));
+    return wrap;
   }
 
   function buildCurvedArc(src, dst) {
@@ -186,10 +242,10 @@
       }
       var src = [Number(e.src_lat), Number(e.src_lon)];
       var dst = [Number(e.dst_lat), Number(e.dst_lon)];
-      var color = colorFor(e.threat);
-      var isHigh = e.threat === "critical" || e.threat === "high";
+      var level = safeThreat(e.threat);
+      var color = colorFor(level);
+      var isHigh = level === "critical" || level === "high";
       var curve = buildCurvedArc(src, dst);
-      var popup = popupFor(e);
 
       // Subtle outer glow + crisp inner trajectory arc
       L.polyline(curve, {
@@ -205,7 +261,7 @@
         color: color,
         weight: isHigh ? 2.6 : 1.9,
         opacity: 0.88
-      }).addTo(arcLayer).bindPopup(popup);
+      }).addTo(arcLayer).bindPopup(function () { return popupFor(e); });
 
       L.circleMarker(src, {
         pane: "threatMarkers",
@@ -214,10 +270,7 @@
         weight: 1.2,
         fillColor: color,
         fillOpacity: 0.9
-      }).addTo(markerLayer).bindPopup(
-        "<b>Source</b><br>" + esc(e.src_ip) + "<br>" +
-        esc(e.src_city) + ", " + esc(e.src_country)
-      );
+      }).addTo(markerLayer).bindPopup(function () { return sourcePopupFor(e); });
 
       L.circleMarker(dst, {
         pane: "threatMarkers",
@@ -226,29 +279,44 @@
         weight: 2,
         fillColor: color,
         fillOpacity: 0.92
-      }).addTo(markerLayer).bindPopup(
-        "<b>Destination</b><br>" + esc(e.dst_domain || e.dst_ip) +
-        "<br>" + esc(e.dst_ip) + " · " + esc(e.dst_city) + ", " + esc(e.dst_country)
-      );
+      }).addTo(markerLayer).bindPopup(function () { return destPopupFor(e); });
     });
     renderTable(events);
+  }
+
+  function buildHostCell(ip, city, country) {
+    var td = document.createElement("td");
+    td.appendChild(text(ip));
+    td.appendChild(document.createElement("br"));
+    td.appendChild(el("span", "muted", (city || "") + ", " + (country || "")));
+    return td;
   }
 
   function renderTable(events) {
     var tbody = document.querySelector("#events-table tbody");
     if (!events.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="muted">No events yet. Enroll a firewall or run the demo seeder.</td></tr>';
+      var emptyRow = document.createElement("tr");
+      var emptyCell = el("td", "muted", "No events yet. Enroll a firewall or run the demo seeder.");
+      emptyCell.colSpan = 7;
+      emptyRow.appendChild(emptyCell);
+      tbody.replaceChildren(emptyRow);
       return;
     }
-    tbody.innerHTML = events.slice(0, 25).map(function (e) {
-      return "<tr><td>" + esc(e.ts) + "</td>" +
-        "<td>" + esc(e.src_ip) + "<br><span class='muted'>" + esc(e.src_city) + ", " + esc(e.src_country) + "</span></td>" +
-        "<td>" + esc(e.dst_ip) + "<br><span class='muted'>" + esc(e.dst_city) + ", " + esc(e.dst_country) + "</span></td>" +
-        "<td>" + esc(e.dst_domain || "—") + "</td>" +
-        "<td>" + esc(e.dst_port) + "</td>" +
-        "<td>" + esc(e.action || "—") + "</td>" +
-        "<td><span class='badge badge-" + esc(e.threat) + "'>" + esc(e.threat) + "</span></td></tr>";
-    }).join("");
+    var rows = events.slice(0, 25).map(function (e) {
+      var tr = document.createElement("tr");
+      var level = safeThreat(e.threat);
+      tr.appendChild(el("td", null, e.ts));
+      tr.appendChild(buildHostCell(e.src_ip, e.src_city, e.src_country));
+      tr.appendChild(buildHostCell(e.dst_ip, e.dst_city, e.dst_country));
+      tr.appendChild(el("td", null, e.dst_domain || "—"));
+      tr.appendChild(el("td", null, e.dst_port));
+      tr.appendChild(el("td", null, e.action || "—"));
+      var badgeTd = document.createElement("td");
+      badgeTd.appendChild(el("span", "badge badge-" + level, level));
+      tr.appendChild(badgeTd);
+      return tr;
+    });
+    tbody.replaceChildren.apply(tbody, rows);
   }
 
   function loadStats() {
@@ -264,9 +332,13 @@
     return fetch("/api/firewalls").then(function (r) { return r.json(); }).then(function (list) {
       var select = document.getElementById("filter-firewall");
       var current = select.value;
-      select.innerHTML = '<option value="">All firewalls</option>' + list.map(function (f) {
-        return '<option value="' + f.id + '">' + esc(f.name) + " (" + esc(f.vendor) + ")</option>";
-      }).join("");
+      var options = [new Option("All firewalls", "")].concat(list.map(function (f) {
+        return new Option(
+          String(f.name == null ? "" : f.name) + " (" + String(f.vendor == null ? "" : f.vendor) + ")",
+          String(f.id == null ? "" : f.id)
+        );
+      }));
+      select.replaceChildren.apply(select, options);
       select.value = current;
     }).catch(function () { /* offline */ });
   }
@@ -313,8 +385,7 @@
             fillColor: "#38bdf8",
             fillOpacity: 0.85
           }).addTo(searchLayer)
-            .bindPopup("<b>" + esc(g.ip) + "</b><br>" + esc(g.city) + ", " + esc(g.country) +
-              "<br><span class='muted'>" + esc(g.isp) + " · via " + esc(g.source) + "</span>")
+            .bindPopup(function () { return geoPopupFor(g); })
             .openPopup();
         }
       })

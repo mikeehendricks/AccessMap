@@ -225,3 +225,247 @@ def test_sec08_non_super_admin_rbac_and_no_store_headers(app, admin_client):
     }).status_code == 302
 
     assert op_client.get("/admin/admins/new").status_code == 403
+
+
+def test_map_js_eliminates_raw_html_sinks_and_renders_dom_safely():
+    """Verify map.js has zero raw HTML sinks (negative XSS test + positive rendering test)."""
+    import pathlib
+    import subprocess
+
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    map_js_path = repo / "accessmap" / "static" / "js" / "map.js"
+    source = map_js_path.read_text(encoding="utf-8")
+
+    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+        assert forbidden not in source, f"Raw HTML sink {forbidden!r} found in map.js"
+
+    harness = r"""
+const fs = require("fs");
+const vm = require("vm");
+
+class FakeNode {
+  constructor(tag) {
+    this.tagName = tag ? tag.toUpperCase() : "#TEXT";
+    this.className = "";
+    this.colSpan = 1;
+    this.value = "";
+    this._text = "";
+    this.children = [];
+    this.listeners = {};
+    this.style = {};
+  }
+  set innerHTML(_v) { throw new Error("Forbidden innerHTML assignment!"); }
+  set outerHTML(_v) { throw new Error("Forbidden outerHTML assignment!"); }
+  set textContent(v) {
+    this.children = [];
+    this._text = v == null ? "" : String(v);
+  }
+  get textContent() {
+    if (this.children.length === 0) return this._text;
+    return this.children.map((c) => c.textContent).join("");
+  }
+  appendChild(child) { this.children.push(child); return child; }
+  replaceChildren(...nodes) { this.children = [...nodes]; }
+  addEventListener(ev, fn) { this.listeners[ev] = fn; }
+}
+
+class FakeOption extends FakeNode {
+  constructor(label = "", value = "") {
+    super("option");
+    this.textContent = label;
+    this.value = String(value);
+  }
+}
+
+const elements = {
+  "stat-events": new FakeNode("span"),
+  "stat-threats": new FakeNode("span"),
+  "stat-countries": new FakeNode("span"),
+  "stat-firewalls": new FakeNode("span"),
+  "filter-firewall": new FakeNode("select"),
+  "filter-threat": new FakeNode("select"),
+  "last-updated": new FakeNode("span"),
+  "refresh-btn": new FakeNode("button"),
+  "ip-search": new FakeNode("input"),
+  "ip-search-btn": new FakeNode("button"),
+  "#events-table tbody": new FakeNode("tbody"),
+};
+
+const boundPopups = [];
+function makeLayer() {
+  return {
+    addTo() { return this; },
+    clearLayers() {},
+    bindPopup(content) { boundPopups.push(content); return this; },
+    openPopup() { return this; },
+  };
+}
+
+let eventsFixture = [];
+let firewallsFixture = [];
+let geoFixture = {};
+
+function fakeFetch(url) {
+  let data = {};
+  if (url.startsWith("/static/vendor/world-countries.geojson")) {
+    data = { type: "FeatureCollection", features: [] };
+  } else if (url.startsWith("/api/firewalls")) {
+    data = firewallsFixture;
+  } else if (url.startsWith("/api/events")) {
+    data = eventsFixture;
+  } else if (url.startsWith("/api/stats")) {
+    data = { total_events: eventsFixture.length, threat_events: 1, destination_countries: 2, firewalls: firewallsFixture.length };
+  } else if (url.startsWith("/api/geo")) {
+    data = geoFixture;
+  }
+  return Promise.resolve({ json: () => Promise.resolve(data) });
+}
+
+const context = {
+  Option: FakeOption,
+  URLSearchParams,
+  Date,
+  Math,
+  Number,
+  String,
+  Object,
+  Promise,
+  encodeURIComponent,
+  setInterval() {},
+  fetch: fakeFetch,
+  document: {
+    createElement: (tag) => new FakeNode(tag),
+    createTextNode: (txt) => { const n = new FakeNode(null); n._text = txt == null ? "" : String(txt); return n; },
+    getElementById: (id) => elements[id],
+    querySelector: (sel) => elements[sel],
+  },
+  L: {
+    map: () => ({
+      setView() { return this; },
+      createPane() {},
+      getPane: () => ({ style: {} }),
+    }),
+    layerGroup: () => makeLayer(),
+    polyline: () => makeLayer(),
+    circleMarker: () => makeLayer(),
+    tileLayer: () => makeLayer(),
+    geoJSON: () => makeLayer(),
+    control: { layers: () => ({ addTo() {} }) },
+  },
+};
+
+const code = fs.readFileSync(process.argv[1], "utf8");
+vm.runInNewContext(code, context);
+
+(async () => {
+  await new Promise((r) => setTimeout(r, 20));
+  // 1. Positive check: empty state row
+  const tbody = elements["#events-table tbody"];
+  if (tbody.children.length !== 1 || tbody.children[0].children[0].colSpan !== 7) {
+    throw new Error("Empty table row failed");
+  }
+
+  // 2. Negative check: hostile XSS & attribute-breakout payloads across all fields
+  firewallsFixture = [{
+    id: "1' onmouseover='alert(1)",
+    name: "<script>alert('fw')</script>",
+    vendor: "<img src=x onerror=alert(1)>",
+  }];
+  eventsFixture = [
+    {
+      ts: "<svg onload=alert(1)>",
+      src_ip: "10.x.x.x",
+      src_city: "<img src=x onerror=alert(2)>",
+      src_country: "Internal",
+      src_lat: 14.5995,
+      src_lon: 120.9842,
+      dst_ip: "203.0.113.11",
+      dst_city: "javascript:alert(3)",
+      dst_country: "United States",
+      dst_lat: 40.7128,
+      dst_lon: -74.006,
+      dst_domain: "<script>alert('dom')</script>",
+      dst_port: 443,
+      action: "' onclick='alert(4)",
+      threat: "low' onmouseover='alert(5)' style='background:red",
+      threat_score: 55,
+    },
+    {
+      ts: "2026-11-20 12:00:00",
+      src_ip: "10.x.x.x",
+      src_city: "LAN",
+      src_country: "Internal",
+      src_lat: 14.5995,
+      src_lon: 120.9842,
+      dst_ip: "198.51.100.20",
+      dst_city: "Frankfurt",
+      dst_country: "Germany",
+      dst_lat: 50.1109,
+      dst_lon: 8.6821,
+      dst_domain: "cdn.example.de",
+      dst_port: 443,
+      action: "deny",
+      threat: "high",
+      threat_score: 60,
+    },
+  ];
+  geoFixture = {
+    ip: "203.0.113.11",
+    city: "<svg onload=alert(6)>",
+    country: "US",
+    lat: 40.7,
+    lon: -74.0,
+    isp: "<script>alert(7)</script>",
+    source: "online",
+  };
+
+  elements["refresh-btn"].listeners.click();
+  elements["ip-search"].value = "203.0.113.11";
+  elements["ip-search-btn"].listeners.click();
+  await new Promise((r) => setTimeout(r, 30));
+
+  if (tbody.children.length !== 2) throw new Error("Expected 2 rendered rows");
+
+  // Malicious threat string must normalize strictly to badge-unknown
+  const badBadge = tbody.children[0].children[6].children[0];
+  if (badBadge.className !== "badge badge-unknown" || badBadge.textContent !== "unknown") {
+    throw new Error("Unexpected badge class/text: " + badBadge.className + " / " + badBadge.textContent);
+  }
+  // Valid threat string preserved
+  const goodBadge = tbody.children[1].children[6].children[0];
+  if (goodBadge.className !== "badge badge-high" || goodBadge.textContent !== "high") {
+    throw new Error("Valid badge broken: " + goodBadge.className);
+  }
+  // Malicious domain preserved strictly as literal text node (no child elements)
+  const domCell = tbody.children[0].children[3];
+  if (domCell.children.length !== 0 || domCell.textContent !== "<script>alert('dom')</script>") {
+    throw new Error("Domain cell was parsed as HTML instead of textContent");
+  }
+  // Every Leaflet popup binding must produce a FakeNode, never a raw HTML string
+  if (boundPopups.length < 4) throw new Error("Expected bound popups");
+  for (const p of boundPopups) {
+    const resolved = typeof p === "function" ? p() : p;
+    if (!(resolved instanceof FakeNode)) {
+      throw new Error("Popup passed raw string instead of DOM node!");
+    }
+  }
+  // Firewall select options built via Option constructor
+  const sel = elements["filter-firewall"];
+  if (sel.children.length !== 2 || !sel.children[1].textContent.includes("<script>alert('fw')</script>")) {
+    throw new Error("Firewall select option rendering failed");
+  }
+  console.log("DOM_SAFE_OK");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+"""
+    proc = subprocess.run(
+        ["node", "-e", harness, str(map_js_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, f"Node harness failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "DOM_SAFE_OK" in proc.stdout
+
