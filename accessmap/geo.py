@@ -72,24 +72,64 @@ def _fallback(ip: str) -> GeoResult:
                      "Unresolved", "fallback")
 
 
+_INTERNAL_NETS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "100.64.0.0/10",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
+
+
+def redact_ip_for_public(ip: str) -> str:
+    """Mask RFC1918/loopback/link-local/ULA host addresses for unauthenticated viewers."""
+    try:
+        addr = ipaddress.ip_address((ip or "").strip())
+    except ValueError:
+        return "redacted"
+    if any(addr in net for net in _INTERNAL_NETS):
+        if addr.version == 4:
+            parts = str(addr).split(".")
+            if parts[0] in {"10", "127"}:
+                return f"{parts[0]}.x.x.x"
+            return f"{parts[0]}.{parts[1]}.x.x"
+        return "fd00::/8"
+    return str(addr)
+
+
 def _online_lookup(ip: str) -> GeoResult | None:
     """Query ip-api.com; return None on any failure (offline, timeout…)."""
     try:
         import requests  # local import: geo works without requests installed
 
-        url = current_app.config["GEO_LOOKUP_URL"].format(ip=ip)
-        resp = requests.get(url, timeout=current_app.config["GEO_LOOKUP_TIMEOUT"])
+        # Canonicalize IP via ipaddress module so URL formatting cannot be injected.
+        canonical_ip = str(ipaddress.ip_address(ip))
+        url = current_app.config["GEO_LOOKUP_URL"].format(ip=canonical_ip)
+        if not url.startswith(("http://", "https://")):
+            return None
+        resp = requests.get(
+            url,
+            timeout=current_app.config["GEO_LOOKUP_TIMEOUT"],
+            allow_redirects=False,
+        )
         resp.raise_for_status()
         data = resp.json()
         if data.get("status") != "success":
             return None
         return GeoResult(
-            ip=ip,
-            country=str(data.get("country", "")),
-            city=str(data.get("city", "")),
+            ip=canonical_ip,
+            country=str(data.get("country", ""))[:64],
+            city=str(data.get("city", ""))[:64],
             lat=float(data.get("lat", 0.0)),
             lon=float(data.get("lon", 0.0)),
-            isp=str(data.get("isp", "")),
+            isp=str(data.get("isp", ""))[:128],
             source="online",
         )
     except Exception:

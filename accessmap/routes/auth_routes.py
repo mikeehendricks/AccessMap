@@ -3,14 +3,14 @@
 One-time registration rule: the public ``/register`` page is only
 available while *zero* admins exist. The first admin created becomes
 a super-admin; afterwards the route returns 403 and additional
-admins can only be created from the admin panel by a signed-in admin.
+admins can only be created from the admin panel by a signed-in super-admin.
 """
 
 from __future__ import annotations
 
 import re
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from accessmap import auth, db
 
@@ -43,7 +43,7 @@ def register():
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
-    """Sign in with username + password (throttled)."""
+    """Sign in with username + password (throttled per client IP + username)."""
     if auth.current_admin() is not None:
         return redirect(url_for("admin.dashboard"))
     if request.method == "POST":
@@ -54,12 +54,18 @@ def login():
             flash("Too many failed attempts. Try again later.", "error")
             return render_template("login.html", username=username)
         admin = db.get_admin_by_username(username)
-        if admin is None or not auth.verify_password(password, admin["password_hash"]):
+        if admin is None:
+            # Equalize PBKDF2 work so response time does not reveal valid usernames.
+            auth.dummy_verify_password(password)
+            auth.record_failure(username)
+            flash("Invalid username or password.", "error")
+            return render_template("login.html", username=username)
+        if not auth.verify_password(password, str(admin["password_hash"])):
             auth.record_failure(username)
             flash("Invalid username or password.", "error")
             return render_template("login.html", username=username)
         auth.record_success(username)
-        auth.login_admin(int(admin["id"]))
+        auth.login_admin(int(admin["id"]), str(admin["password_hash"]))
         db.touch_login(int(admin["id"]))
         flash(f"Welcome back, {admin['username']}.", "success")
         next_url = request.args.get("next", "")

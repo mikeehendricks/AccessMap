@@ -95,15 +95,19 @@ def test_disabled_firewall_cannot_ingest(enrolled_firewall):
 
 
 def test_token_rotation_invalidates_old_token(enrolled_firewall):
+    import re
     from tests.conftest import fetch_csrf
     client, firewall = enrolled_firewall
     old_token = firewall["ingest_token"]
-    client.post(f"/admin/firewalls/{firewall['id']}/rotate-token",
-                data={"csrf_token": fetch_csrf(client)})
+    rot = client.post(f"/admin/firewalls/{firewall['id']}/rotate-token",
+                      data={"csrf_token": fetch_csrf(client)})
+    assert rot.status_code == 302
+    detail = client.get(rot.headers["Location"])
+    match = re.search(r'<code class="token">([^<]+)</code>', detail.get_data(as_text=True))
+    assert match
+    new_token = match.group(1)
+    assert new_token != old_token
     resp = _post_json(client, old_token, {"events": [SAMPLE_EVENT]})
     assert resp.status_code == 401
-    with client.application.app_context():
-        new_token = db.get_firewall(firewall["id"])["ingest_token"]
-    assert new_token != old_token
     resp = _post_json(client, new_token, {"events": [SAMPLE_EVENT]})
     assert resp.status_code == 201

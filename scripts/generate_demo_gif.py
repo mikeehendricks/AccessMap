@@ -586,7 +586,9 @@ def main() -> None:
         seed_module.seed()
         events = [dict(r) for r in db.list_events(limit=100)]
         firewalls = [dict(r) for r in db.list_firewalls()]
-        token = dict(db.get_firewall(firewalls[0]["id"]))["ingest_token"]
+        import secrets as _secrets
+        token = _secrets.token_urlsafe(32)
+        db.update_firewall(firewalls[0]["id"], token=token)
 
     base_world = build_base_world(W - 36, 310)
 

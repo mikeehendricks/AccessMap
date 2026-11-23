@@ -39,7 +39,7 @@ draws source → destination arcs on a world map, colour-coded by threat level.
   creates the service user, systemd unit, firewall rules and nginx proxy,
   then health-checks the app.
 - **Clean code** — small modules with single responsibilities, type hints,
-  parameterized SQL everywhere, and a 35-test pytest suite.
+  parameterized SQL everywhere, and a 43-test pytest suite.
 
 ## Screenshots
 
@@ -131,26 +131,33 @@ accessmap/
   static/               CSS + map JS + vendored Leaflet & Natural Earth world GeoJSON
 install.sh              One-time Ubuntu installer
 deploy/                 systemd unit + nginx reverse-proxy config
-tests/                  35 pytest tests (auth, ingest, geo, security, usability)
+tests/                  43 pytest tests (auth, ingest, geo, security audit, usability)
 docs/TESTING.md         Usability / bug / vulnerability test report
+docs/SECURITY_AUDIT_REPORT.md   Executive security vulnerability report & fixes
 scripts/capture_screenshots.py   Regenerate README screenshots
 scripts/generate_demo_gif.py     Regenerate 15-second README walkthrough GIF
 ```
 
 ## Security notes
 
-- Passwords: PBKDF2-HMAC-SHA256 with per-password salts (260k iterations).
+- Passwords: PBKDF2-HMAC-SHA256 with per-password salts (260k iterations)
+  and timing-equalized login checks; password changes immediately revoke
+  other active sessions.
 - Sessions: HttpOnly + SameSite=Lax cookies; CSRF token on every form;
-  login throttling with lockout; constant-time token comparisons.
+  `(client_ip, username)` login throttling; super-admin RBAC for admin creation.
+- Firewall ingest tokens: **SHA-256 hashed at rest**, displayed strictly
+  once upon enrollment/rotation, and accepted only via `Authorization: Bearer`.
+- Public privacy: unauthenticated `/api/events` and `/api/firewalls`
+  mask internal RFC1918 LAN IPs, strip usernames, and omit appliance FQDNs.
 - All SQL is parameterized; templates auto-escape output; security
-  headers (CSP, nosniff, SAMEORIGIN) are set on every response.
-- Ingest tokens are never exposed via the API and can be rotated or
-  disabled per firewall.
+  headers (CSP, nosniff, SAMEORIGIN, strict-origin-when-cross-origin,
+  Permissions-Policy, `Cache-Control: no-store` on admin/auth) are set.
 - Set `COOKIE_SECURE=1` and serve over HTTPS in production (the
-  installer + nginx + certbot path in `deploy/` does this).
+  installer + Gunicorn + nginx + certbot path in `deploy/` does this).
 
-See [docs/TESTING.md](docs/TESTING.md) for the full usability, bug and
-vulnerability test report.
+See [docs/SECURITY_AUDIT_REPORT.md](docs/SECURITY_AUDIT_REPORT.md) for the
+full executive vulnerability assessment and [docs/TESTING.md](docs/TESTING.md)
+for the usability, bug and vulnerability test report.
 
 ## License
 

@@ -36,7 +36,7 @@ def seed() -> None:
         print("Events already exist — skipping demo seed.")
         return
     admin = db.get_admin_by_username("admin")
-    created_by = int(admin["id"]) if admin else 0
+    created_by = int(admin["id"]) if admin else None
 
     fortinet = db.create_firewall(
         "FG-Manila-01", "fortinet", "fg-manila-01.example.local", "Manila HQ",
