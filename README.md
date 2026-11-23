@@ -5,7 +5,14 @@ PAN-OS firewalls. Enrolled firewalls stream the websites their end users
 visit; AccessMap resolves the **source and destination IP locations** and
 draws source → destination arcs on a world map, colour-coded by threat level.
 
-![Threat map](screenshots/threat-map.png)
+## How it works (15-second walkthrough)
+
+![AccessMap 15-second demo](screenshots/accessmap-demo.gif)
+
+1. **`0.0s – 3.0s` · One-Time Admin Setup & Sign-In** — The first admin registers once (`/register` then locks permanently with `HTTP 403`) and signs in to the SOC panel.
+2. **`3.0s – 6.5s` · Enroll Fortinet & Palo Alto Firewalls** — Admins enroll FortiGate and PAN-OS appliances, copy their Bearer ingest token, and point syslog/HTTPS forwarders to `POST /api/ingest`.
+3. **`6.5s – 12.5s` · Live Stream & World Threat Map** — AccessMap geo-resolves source and destination IPs, scores threats, and plots curved trajectories across the world map alongside the live visits feed.
+4. **`12.5s – 15.0s` · Filter Threats & Locate Any IP** — Analysts filter down to High/Critical events and jump directly to any IP's resolved location on the map.
 
 ## Features
 
@@ -44,8 +51,9 @@ draws source → destination arcs on a world map, colour-coded by threat level.
 |---|---|
 | ![Firewall detail](screenshots/firewall-detail.png) | ![Sign in](screenshots/login.png) |
 
-> Screenshots are rendered from real seeded application data by
-> `scripts/capture_screenshots.py` (no browser needed).
+> Screenshots and the 15-second walkthrough GIF are rendered from real
+> seeded application data by `scripts/capture_screenshots.py` and
+> `scripts/generate_demo_gif.py` (no browser needed).
 
 ## Quick start
 
@@ -126,6 +134,7 @@ deploy/                 systemd unit + nginx reverse-proxy config
 tests/                  35 pytest tests (auth, ingest, geo, security, usability)
 docs/TESTING.md         Usability / bug / vulnerability test report
 scripts/capture_screenshots.py   Regenerate README screenshots
+scripts/generate_demo_gif.py     Regenerate 15-second README walkthrough GIF
 ```
 
 ## Security notes
