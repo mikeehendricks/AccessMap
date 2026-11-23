@@ -1,5 +1,6 @@
 # AccessMap runtime dependencies (Python 3.10+)
 Flask>=3.0,<4.0
+gunicorn>=22.0,<24.0
 requests>=2.31
 # Dev / test only:
 # pytest>=8.0

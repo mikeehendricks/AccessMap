@@ -13,10 +13,18 @@
 </section>
 
 <section class="card">
-  <h2>Ingest token (shown once — copy it now)</h2>
-  <p class="muted">Configure the firewall to POST events to this endpoint with
-     <code>Authorization: Bearer &lt;token&gt;</code>. Rotating the token invalidates the old one.</p>
-  <p><code class="token">{{ firewall.ingest_token }}</code></p>
+  {% if revealed_token %}
+    <h2>Ingest token (shown once — copy it now)</h2>
+    <p class="muted">Configure the firewall to POST events to this endpoint with
+       <code>Authorization: Bearer &lt;token&gt;</code>. Only a SHA-256 hash is stored, so this
+       token will not be displayed again after you leave or refresh this page.</p>
+    <p><code class="token">{{ revealed_token }}</code></p>
+  {% else %}
+    <h2>Ingest token (stored as SHA-256 hash)</h2>
+    <p class="muted">The plaintext token was displayed once upon enrollment/rotation and is never
+       stored in cleartext. Rotate the token below if you need to issue a new one.</p>
+    <p><code class="token">{{ firewall.token_prefix }}••••••••••••••••••••••••</code></p>
+  {% endif %}
   <p><code class="token">{{ ingest_url }}</code></p>
   <form method="post" action="{{ url_for('admin.rotate_token', firewall_id=firewall.id) }}" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -27,12 +35,13 @@
     <button class="btn" type="submit">{{ 'Disable' if firewall.enabled else 'Enable' }} firewall</button>
   </form>
   <form method="post" action="{{ url_for('admin.delete_firewall', firewall_id=firewall.id) }}" class="inline-form"
-        onsubmit="return confirm('Delete this firewall and all its events?');">
+        data-confirm="Delete this firewall and all its events?">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="btn btn-danger" type="submit">Delete firewall</button>
   </form>
 </section>
 
+{% set token_example = revealed_token if revealed_token else (firewall.token_prefix ~ '<YOUR_SAVED_TOKEN>') %}
 <section class="card">
   <h2>Forwarding examples</h2>
   <h3>FortiGate (syslog over HTTPS JSON forwarder)</h3>
@@ -40,14 +49,14 @@
     set server "{{ ingest_url }}"
     set format json
     set custom-field-name1 "Authorization"
-    set custom-field-value1 "Bearer {{ firewall.ingest_token }}"
+    set custom-field-value1 "Bearer {{ token_example }}"
 end
 config log syslogd filter
     set advanced-filter "field['action'] eq 'allow' or field['action'] eq 'deny'"
 end</pre>
   <h3>Palo Alto PAN-OS (syslog forwarding profile)</h3>
   <pre>Server: {{ ingest_url }}  (HTTP POST, JSON)
-Header: Authorization: Bearer {{ firewall.ingest_token }}
+Header: Authorization: Bearer {{ token_example }}
 Body: {"events":[{"src_ip":"$SRC","dst_ip":"$DST","dst_domain":"$HOST",
       "dst_port":$DPORT,"protocol":"$PROTO","action":"$ACTION",
       "bytes_out":$BYTES}]}</pre>
@@ -74,4 +83,7 @@ Body: {"events":[{"src_ip":"$SRC","dst_ip":"$DST","dst_domain":"$HOST",
     </table>
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 {% endblock %}

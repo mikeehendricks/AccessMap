@@ -3,19 +3,24 @@
 Design rules (enforced by review + tests):
 * Every query is parameterized — user input is never interpolated
   into SQL strings.
-* One connection per request (Flask ``g``), WAL journal mode for
-  concurrent readers (map polling) + a single writer (ingest).
+* Firewall ingest tokens are stored exclusively as SHA-256 hashes
+  (``token_hash``) plus a short non-secret ``token_prefix``.
+* One connection per request (Flask ``g``), WAL journal mode +
+  5 s busy timeout for concurrent readers/writers under Gunicorn.
 * Schema is created idempotently on first use (``init_db``).
 """
 
 from __future__ import annotations
 
+import hmac
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from flask import current_app, g
+
+from accessmap import auth
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS admins (
@@ -34,7 +39,8 @@ CREATE TABLE IF NOT EXISTS firewalls (
     vendor        TEXT NOT NULL CHECK (vendor IN ('fortinet', 'paloalto', 'other')),
     host          TEXT NOT NULL DEFAULT '',
     site          TEXT NOT NULL DEFAULT '',
-    ingest_token  TEXT NOT NULL UNIQUE,
+    token_hash    TEXT NOT NULL UNIQUE,
+    token_prefix  TEXT NOT NULL DEFAULT '',
     enabled       INTEGER NOT NULL DEFAULT 1,
     created_by    INTEGER REFERENCES admins(id),
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -81,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_events_fw ON events(firewall_id);
 CREATE INDEX IF NOT EXISTS idx_events_threat ON events(threat);
 """
 
-# Columns returned by the public event feed (never expose tokens/hashes).
+# Columns returned by the event queries (never expose hashes/secrets).
 EVENT_COLUMNS = (
     "id, ts, src_ip, dst_ip, dst_domain, dst_port, protocol, action, "
     "bytes_out, user_name, threat, threat_score, "
@@ -95,9 +101,10 @@ def get_db() -> sqlite3.Connection:
     if "db" not in g:
         db_path = Path(current_app.config["DATABASE_URL"])
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
         g.db = conn
     return g.db
@@ -122,10 +129,27 @@ def transaction() -> Iterator[sqlite3.Connection]:
         raise
 
 
+def _migrate_legacy_firewalls(conn: sqlite3.Connection) -> None:
+    """Upgrade legacy ``ingest_token`` column to ``token_hash`` + ``token_prefix``."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(firewalls)").fetchall()}
+    if "ingest_token" in cols and "token_hash" not in cols:
+        conn.execute("ALTER TABLE firewalls ADD COLUMN token_hash TEXT DEFAULT ''")
+        conn.execute("ALTER TABLE firewalls ADD COLUMN token_prefix TEXT NOT NULL DEFAULT ''")
+        rows = conn.execute("SELECT id, ingest_token FROM firewalls").fetchall()
+        for row in rows:
+            raw = str(row["ingest_token"] or "")
+            conn.execute(
+                "UPDATE firewalls SET token_hash = ?, token_prefix = ?, ingest_token = 'REDACTED' WHERE id = ?",
+                (auth.hash_token(raw), raw[:8], int(row["id"])),
+            )
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_firewalls_token_hash ON firewalls(token_hash)")
+
+
 def init_db() -> None:
-    """Create all tables/indexes if they do not exist yet."""
+    """Create all tables/indexes (and apply migrations) idempotently."""
     conn = get_db()
     conn.executescript(SCHEMA)
+    _migrate_legacy_firewalls(conn)
     conn.commit()
 
 
@@ -147,6 +171,13 @@ def get_admin_by_username(username: str) -> Optional[sqlite3.Row]:
     """Fetch an admin by username (case-insensitive) or None."""
     return get_db().execute(
         "SELECT * FROM admins WHERE username = ? COLLATE NOCASE", (username.strip(),)
+    ).fetchone()
+
+
+def get_admin_by_email(email: str) -> Optional[sqlite3.Row]:
+    """Fetch an admin by email (case-insensitive) or None."""
+    return get_db().execute(
+        "SELECT * FROM admins WHERE email = ? COLLATE NOCASE", (email.strip().lower(),)
     ).fetchone()
 
 
@@ -184,40 +215,56 @@ def set_password(admin_id: int, password_hash: str) -> None:
 # Firewalls
 # ---------------------------------------------------------------------------
 
-def create_firewall(name: str, vendor: str, host: str, site: str, token: str, created_by: int) -> int:
-    """Enroll a firewall and return its id."""
+def create_firewall(
+    name: str, vendor: str, host: str, site: str, token: str, created_by: Optional[int]
+) -> int:
+    """Enroll a firewall (storing only SHA-256 token hash + 8-char prefix) and return its id."""
+    token_hash = auth.hash_token(token)
+    token_prefix = token[:8]
+    owner_id = int(created_by) if created_by else None
     with transaction() as conn:
         cur = conn.execute(
-            "INSERT INTO firewalls (name, vendor, host, site, ingest_token, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (name.strip(), vendor, host.strip(), site.strip(), token, created_by),
+            "INSERT INTO firewalls (name, vendor, host, site, token_hash, token_prefix, created_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name.strip(), vendor, host.strip(), site.strip(), token_hash, token_prefix, owner_id),
         )
         return int(cur.lastrowid)
 
 
 def get_firewall(firewall_id: int) -> Optional[sqlite3.Row]:
     """Fetch a firewall by id or None."""
-    return get_db().execute("SELECT * FROM firewalls WHERE id = ?", (firewall_id,)).fetchone()
+    return get_db().execute(
+        "SELECT id, name, vendor, host, site, token_prefix, enabled, created_by, "
+        "created_at, last_seen_at FROM firewalls WHERE id = ?",
+        (firewall_id,),
+    ).fetchone()
 
 
 def get_firewall_by_token(token: str) -> Optional[sqlite3.Row]:
-    """Fetch a firewall by its ingest token or None (constant-time compare)."""
+    """Fetch a firewall by raw ingest token using SHA-256 + constant-time check."""
+    digest = auth.hash_token(token)
     row = get_db().execute(
-        "SELECT * FROM firewalls WHERE ingest_token = ?", (token,)
+        "SELECT * FROM firewalls WHERE token_hash = ?", (digest,)
     ).fetchone()
+    if row is None or not hmac.compare_digest(str(row["token_hash"]), digest):
+        return None
     return row
 
 
 def list_firewalls() -> list[sqlite3.Row]:
-    """Return all firewalls with their event counts, newest first."""
+    """Return all firewalls (without token hashes) with their event counts, newest first."""
     return get_db().execute(
-        "SELECT f.*, (SELECT COUNT(*) FROM events e WHERE e.firewall_id = f.id) AS event_count "
+        "SELECT f.id, f.name, f.vendor, f.host, f.site, f.token_prefix, f.enabled, "
+        "f.created_by, f.created_at, f.last_seen_at, "
+        "(SELECT COUNT(*) FROM events e WHERE e.firewall_id = f.id) AS event_count "
         "FROM firewalls f ORDER BY f.id DESC"
     ).fetchall()
 
 
-def update_firewall(firewall_id: int, *, enabled: Optional[bool] = None, token: Optional[str] = None) -> None:
-    """Update a firewall's enabled flag and/or rotate its ingest token."""
+def update_firewall(
+    firewall_id: int, *, enabled: Optional[bool] = None, token: Optional[str] = None
+) -> None:
+    """Update a firewall's enabled flag and/or rotate its hashed ingest token."""
     with transaction() as conn:
         if enabled is not None:
             conn.execute(
@@ -225,7 +272,8 @@ def update_firewall(firewall_id: int, *, enabled: Optional[bool] = None, token: 
             )
         if token is not None:
             conn.execute(
-                "UPDATE firewalls SET ingest_token = ? WHERE id = ?", (token, firewall_id)
+                "UPDATE firewalls SET token_hash = ?, token_prefix = ? WHERE id = ?",
+                (auth.hash_token(token), token[:8], firewall_id),
             )
 
 
@@ -254,8 +302,17 @@ def get_geo(ip: str) -> Optional[sqlite3.Row]:
 
 
 def put_geo(ip: str, country: str, city: str, lat: float, lon: float, isp: str, source: str) -> None:
-    """Insert or replace a geo-cache row."""
+    """Insert or replace a geo-cache row, bounding total cache entries."""
+    max_entries = int(current_app.config.get("MAX_GEO_CACHE_ENTRIES", 10000))
     with transaction() as conn:
+        count = int(conn.execute("SELECT COUNT(*) AS c FROM geo_cache").fetchone()["c"])
+        if count >= max_entries:
+            prune_n = max(1, max_entries // 10)
+            conn.execute(
+                "DELETE FROM geo_cache WHERE ip IN ("
+                "SELECT ip FROM geo_cache ORDER BY resolved_at ASC LIMIT ?)",
+                (prune_n,),
+            )
         conn.execute(
             "INSERT INTO geo_cache (ip, country, city, lat, lon, isp, source) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) "

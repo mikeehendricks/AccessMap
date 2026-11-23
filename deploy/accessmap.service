@@ -8,7 +8,7 @@ User=accessmap
 Group=accessmap
 WorkingDirectory=/opt/accessmap
 EnvironmentFile=/opt/accessmap/.env
-ExecStart=/opt/accessmap/.venv/bin/python app.py
+ExecStart=/bin/sh -c 'exec /opt/accessmap/.venv/bin/gunicorn --bind "${HOST:-127.0.0.1}:${PORT:-5000}" --workers 2 --threads 4 --timeout 30 "app:create_app()"'
 Restart=on-failure
 RestartSec=5
 # Hardening

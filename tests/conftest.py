@@ -32,12 +32,14 @@ class TestConfig:
 
 @pytest.fixture(autouse=True)
 def _reset_throttle():
-    """Clear the in-memory login throttle between tests."""
+    """Clear the in-memory login throttle & rate-limit buckets between tests."""
     from accessmap import auth
 
     auth._THROTTLE.clear()
+    auth._RATE_BUCKETS.clear()
     yield
     auth._THROTTLE.clear()
+    auth._RATE_BUCKETS.clear()
 
 
 @pytest.fixture()
@@ -100,7 +102,9 @@ def fetch_csrf(client) -> str:
 
 @pytest.fixture()
 def enrolled_firewall(admin_client):
-    """Enroll one Fortinet firewall; return (client, firewall_row)."""
+    """Enroll one Fortinet firewall; capture its one-time token from the detail page."""
+    import re
+
     resp = admin_client.post("/admin/firewalls/new", data={
         "csrf_token": fetch_csrf(admin_client),
         "name": "FG-Test-01",
@@ -109,6 +113,12 @@ def enrolled_firewall(admin_client):
         "site": "Test Lab",
     })
     assert resp.status_code == 302
+    detail = admin_client.get(resp.headers["Location"])
+    assert detail.status_code == 200
+    match = re.search(r'<code class="token">([^<]+)</code>', detail.get_data(as_text=True))
+    assert match, "One-time revealed ingest token not found on detail page"
+    revealed_token = match.group(1)
     with admin_client.application.app_context():
-        row = db.list_firewalls()[0]
+        row = dict(db.list_firewalls()[0])
+    row["ingest_token"] = revealed_token
     return admin_client, row

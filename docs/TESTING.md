@@ -6,8 +6,10 @@ with:
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
-# 35 passed
+# 43 passed
 ```
+
+> For the formal executive security assessment covering `SEC-01` through `SEC-08`, see [docs/SECURITY_AUDIT_REPORT.md](SECURITY_AUDIT_REPORT.md).
 
 ## 1. Usability testing
 

@@ -382,6 +382,10 @@ def main() -> None:
         firewalls = [dict(r) for r in db.list_firewalls()]
         admins = [dict(r) for r in db.list_admins()]
         firewall = dict(db.get_firewall(firewalls[0]["id"]))
+        import secrets as _secrets
+        demo_tok = _secrets.token_urlsafe(32)
+        db.update_firewall(firewall["id"], token=demo_tok)
+        firewall["ingest_token"] = demo_tok
 
     screenshot_threat_map(events, stats)
     screenshot_dashboard(stats, firewalls, admins)

@@ -10,14 +10,16 @@ First run: open ``/register`` once to create the first admin.
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
-from pathlib import Path
 
 from flask import Flask, render_template, request
 
 from accessmap import auth, db
 from accessmap.config import Config
 from accessmap.routes import admin_routes, api_routes, auth_routes, ingest_routes
+
+_WEAK_SECRET_KEYS = {"", "change-me", "dev-only-change-me", "replace-with-a-random-hex-string"}
 
 
 def create_app(config: type[Config] | None = None) -> Flask:
@@ -28,6 +30,16 @@ def create_app(config: type[Config] | None = None) -> Flask:
         static_folder="accessmap/static",
     )
     app.config.from_object(config or Config)
+    if config is None and os.environ.get("SECRET_KEY"):
+        app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+
+    if app.config.get("REQUIRE_SECRET_KEY"):
+        raw_env_key = os.environ.get("SECRET_KEY", "") if config is None else str(app.config.get("SECRET_KEY", ""))
+        if raw_env_key in _WEAK_SECRET_KEYS or len(raw_env_key) < 16:
+            raise RuntimeError(
+                "SECRET_KEY must be set to a strong random value (>= 16 chars) when REQUIRE_SECRET_KEY=1."
+            )
+
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
         seconds=app.config["PERMANENT_SESSION_LIFETIME"]
     )
@@ -48,7 +60,7 @@ def create_app(config: type[Config] | None = None) -> Flask:
 
     @app.after_request
     def add_security_headers(response):
-        """Baseline security headers (see docs/TESTING.md)."""
+        """Baseline security headers (see docs/SECURITY_AUDIT_REPORT.md)."""
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         if not app.config.get("ALLOW_FRAME_EMBED", False):
             response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
@@ -64,6 +76,11 @@ def create_app(config: type[Config] | None = None) -> Flask:
         # strict-origin-when-cross-origin preserves origin Referer required by
         # OpenStreetMap's Tile Usage Policy without leaking paths or query params.
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=()"
+        )
+        if request.path.startswith(("/admin", "/login", "/register")):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.route("/", methods=["GET"])

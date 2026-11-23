@@ -7,7 +7,9 @@
      Enroll firewalls, manage admins, and monitor the feed.</p>
   <p>
     <a class="btn btn-primary" href="{{ url_for('admin.new_firewall') }}">+ Enroll firewall</a>
-    <a class="btn" href="{{ url_for('admin.new_admin') }}">+ Add admin</a>
+    {% if current.is_super %}
+      <a class="btn" href="{{ url_for('admin.new_admin') }}">+ Add admin</a>
+    {% endif %}
     <a class="btn btn-ghost" href="{{ url_for('admin.change_password') }}">Change my password</a>
     <a class="btn btn-ghost" href="{{ url_for('index') }}">View threat map</a>
   </p>
